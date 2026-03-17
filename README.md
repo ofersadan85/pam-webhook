@@ -54,10 +54,10 @@ Choose the module directory used by your distro (commonly one of these):
 Copy and secure:
 
 ```bash
-sudo install -o root -g root -m 0755 target/release/libpam_webhook.so /lib/security/libpam_webhook.so
+sudo install -o root -g root -m 0644 ~/.cargo/target/release/libpam_webhook.so /lib/x86_64-linux-gnu/security/pam_webhook.so
 ```
 
-Adjust destination path as needed for your distro.
+Adjust source and destination paths as needed for your distro.
 
 ## Configure `sshd` PAM stack
 
@@ -68,7 +68,7 @@ Edit `/etc/pam.d/sshd` and add module lines where appropriate. Example:
 ```pam
 auth    optional    pam_webhook.so
 account optional    pam_webhook.so
-session optional    pam_webhook.so
+session optional    pam_webhook.so config=/etc/pam-webhook.toml
 password optional   pam_webhook.so
 ```
 
@@ -76,6 +76,22 @@ Notes:
 
 - PAM module names in config are typically written without the `lib` prefix and `.so` suffix (`pam_webhook.so`).
 - Control flags (`required`, `requisite`, `sufficient`, `optional`) change behavior significantly. Start with `optional` while validating.
+
+## Module configuration argument
+
+The module accepts one actionable argument: `config=/path/to/file.toml`.
+
+- If no `config=` argument is present, defaults are used.
+- Unknown module arguments are ignored.
+- If `config=` is present but the file cannot be read or parsed, the PAM hook returns an error.
+
+Current TOML fields:
+
+```toml
+log_path = "/var/log/pam-webhook.log"
+```
+
+`log_path` controls where `log_hook_call` appends diagnostic entries.
 
 ## Ensure SSH uses PAM
 

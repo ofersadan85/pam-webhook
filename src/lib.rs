@@ -6,8 +6,8 @@ use std::ptr;
 use pam_sys::raw::pam_get_item;
 use pam_sys::{PamHandle, PamItemType, PamReturnCode};
 
-mod args;
-use args::parse_args;
+mod config;
+use config::{Config, append_log_line, load_hook_config};
 
 /// Called by PAM during authentication (for example when sshd checks credentials).
 ///
@@ -21,8 +21,8 @@ pub unsafe extern "C" fn pam_sm_authenticate(
     argc: c_int,
     argv: *const *const c_char,
 ) -> c_int {
-    let args = unsafe { parse_args(argc, argv) };
-    log_hook_call("pam_sm_authenticate", pamh, flags, &args);
+    let config = load_hook_config("pam_sm_authenticate", argc, argv);
+    log_hook_call("pam_sm_authenticate", pamh, flags, &config);
     success_code()
 }
 
@@ -38,8 +38,8 @@ pub unsafe extern "C" fn pam_sm_setcred(
     argc: c_int,
     argv: *const *const c_char,
 ) -> c_int {
-    let args = unsafe { parse_args(argc, argv) };
-    log_hook_call("pam_sm_setcred", pamh, flags, &args);
+    let config = load_hook_config("pam_sm_setcred", argc, argv);
+    log_hook_call("pam_sm_setcred", pamh, flags, &config);
     success_code()
 }
 
@@ -55,8 +55,8 @@ pub unsafe extern "C" fn pam_sm_acct_mgmt(
     argc: c_int,
     argv: *const *const c_char,
 ) -> c_int {
-    let args = unsafe { parse_args(argc, argv) };
-    log_hook_call("pam_sm_acct_mgmt", pamh, flags, &args);
+    let config = load_hook_config("pam_sm_acct_mgmt", argc, argv);
+    log_hook_call("pam_sm_acct_mgmt", pamh, flags, &config);
     success_code()
 }
 
@@ -72,8 +72,8 @@ pub unsafe extern "C" fn pam_sm_open_session(
     argc: c_int,
     argv: *const *const c_char,
 ) -> c_int {
-    let args = unsafe { parse_args(argc, argv) };
-    log_hook_call("pam_sm_open_session", pamh, flags, &args);
+    let config = load_hook_config("pam_sm_open_session", argc, argv);
+    log_hook_call("pam_sm_open_session", pamh, flags, &config);
     success_code()
 }
 
@@ -89,8 +89,8 @@ pub unsafe extern "C" fn pam_sm_close_session(
     argc: c_int,
     argv: *const *const c_char,
 ) -> c_int {
-    let args = unsafe { parse_args(argc, argv) };
-    log_hook_call("pam_sm_close_session", pamh, flags, &args);
+    let config = load_hook_config("pam_sm_close_session", argc, argv);
+    log_hook_call("pam_sm_close_session", pamh, flags, &config);
     success_code()
 }
 
@@ -106,20 +106,23 @@ pub unsafe extern "C" fn pam_sm_chauthtok(
     argc: c_int,
     argv: *const *const c_char,
 ) -> c_int {
-    let args = unsafe { parse_args(argc, argv) };
-    log_hook_call("pam_sm_chauthtok", pamh, flags, &args);
+    let config = load_hook_config("pam_sm_chauthtok", argc, argv);
+    log_hook_call("pam_sm_chauthtok", pamh, flags, &config);
     success_code()
 }
 
 // Linux-PAM service modules expose the six pam_sm_* hooks above; there are no
 // additional Linux-specific service entrypoints to export for this module type.
-fn log_hook_call(hook: &str, pamh: *mut PamHandle, flags: c_int, args: &[String]) {
+fn log_hook_call(hook: &str, pamh: *mut PamHandle, flags: c_int, config: &Config) {
     // Placeholder diagnostics for future webhook integration. Keep secrets out.
     let user = unsafe { get_item(pamh, PamItemType::USER) };
     let rhost = unsafe { get_item(pamh, PamItemType::RHOST) };
     let tty = unsafe { get_item(pamh, PamItemType::TTY) };
-    eprintln!(
-        "[pam-webhook] hook={hook} flags={flags} args={args:?} user={user:?} rhost={rhost:?} tty={tty:?}"
+    let _ = append_log_line(
+        &config.log_path,
+        &format!(
+            "[pam-webhook] hook={hook} flags={flags} user={user:?} rhost={rhost:?} tty={tty:?}",
+        ),
     );
 }
 
