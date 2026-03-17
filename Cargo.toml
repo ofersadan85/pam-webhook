@@ -1,0 +1,17 @@
+[package]
+name = "pam-webhook"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pam-sys = "0.5.6"
+
+# [lints.rust]
+# unused_imports = "allow"
+# dead_code = "allow"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
