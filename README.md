@@ -66,9 +66,16 @@ Before editing PAM config, keep a root session open to avoid lockout.
 Edit `/etc/pam.d/sshd` and add module lines where appropriate. Example:
 
 ```pam
+# Auth stack: can trigger pam_sm_authenticate and pam_sm_setcred
 auth    optional    pam_webhook.so
+
+# Account stack: triggers pam_sm_acct_mgmt
 account optional    pam_webhook.so
+
+# Session stack: triggers pam_sm_open_session and pam_sm_close_session
 session optional    pam_webhook.so config=/etc/pam-webhook.toml
+
+# Password stack: triggers pam_sm_chauthtok
 password optional   pam_webhook.so
 ```
 
@@ -76,6 +83,18 @@ Notes:
 
 - PAM module names in config are typically written without the `lib` prefix and `.so` suffix (`pam_webhook.so`).
 - Control flags (`required`, `requisite`, `sufficient`, `optional`) change behavior significantly. Start with `optional` while validating.
+- PAM has 4 stack types (`auth`, `account`, `session`, `password`) but this module exports 6 hooks. `auth` maps to both authentication and credential-establish/reset behavior, and `session` maps to both open and close behavior.
+
+## PAM hook behavior reference
+
+`pam_webhook` exports six Linux-PAM service module hooks. A service calls different hooks at different phases of login/session/password workflows.
+
+- `pam_sm_authenticate` (`auth` stack): user authentication step (for example, checking whether login should be allowed).
+- `pam_sm_setcred` (`auth` stack): establish, refresh, or delete user credentials after/beside authentication (trigger depends on service behavior and `pam_setcred` usage).
+- `pam_sm_acct_mgmt` (`account` stack): account policy checks (for example, account validity windows, lock status, authorization constraints).
+- `pam_sm_open_session` (`session` stack): session start actions when a login session is opened.
+- `pam_sm_close_session` (`session` stack): session teardown actions when a login session is closed.
+- `pam_sm_chauthtok` (`password` stack): password/token update flow.
 
 ## Module configuration argument
 

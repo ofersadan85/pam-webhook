@@ -23,8 +23,6 @@
   - call `log_hook_call(...)` for diagnostics,
   - return a success status via `success_code()`.
 - The crate is Linux-only and uses `pam-sys` directly:
-  - `get_item(...)` calls `pam_get_item` to read `User`, `Rhost`, and `Tty`,
-  - `success_code()` returns `PamReturnCode::SUCCESS`.
 
 ## Key conventions in this repo
 
@@ -34,3 +32,4 @@
 - Reuse shared helpers (`log_hook_call`, `get_item`, `success_code`) instead of per-hook custom logic when adding behavior.
 - Avoid logging secrets; existing diagnostics only include hook name, flags, and selected PAM metadata.
 - Assume Linux-only operation; do not add non-Linux stubs or platform fallbacks.
+- `handlers.rs` defines the `PamEventHandler` trait with default no-op implementations for all hooks, which can be overridden as needed for future logic.

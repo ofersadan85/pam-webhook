@@ -1,103 +1,133 @@
+use crate::handlers::{PamEventHandler, get_item};
+use pam_sys::{PamHandle, PamItemType};
 use serde::Deserialize;
 use std::{
-    ffi::{CStr, c_char, c_int},
+    ffi::c_int,
+    fmt::Write as _,
     fs::{OpenOptions, read_to_string},
-    io::{self, Write},
-    path::{Path, PathBuf},
+    io::Write as _,
+    path::PathBuf,
 };
 
-const DEFAULT_LOG_PATH: &str = "/var/log/pam-webhook.log";
-
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct Config {
-    pub(crate) log_path: PathBuf,
+    pub(crate) log_path: Option<PathBuf>,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            log_path: PathBuf::from(DEFAULT_LOG_PATH),
-        }
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum ConfigError {
-    #[error("module arguments contain non-UTF-8 data")]
-    InvalidUtf8Arg,
-    #[error("`config=` was provided without a path")]
-    EmptyConfigPath,
-    #[error("failed to read config file: {0}")]
-    ReadFailed(#[from] io::Error),
-    #[error("failed to parse TOML config: {0}")]
-    ParseFailed(#[from] toml::de::Error),
-}
-
-/// # Safety
-/// This function reads raw C argument pointers passed by PAM.
-/// Since PAM is very well tried and tested, we can assume this is safe and valid
-/// as long as we handle null pointers and invalid UTF-8 gracefully, which we do by returning errors instead of panicking.
-#[allow(clippy::similar_names)]
-fn parse_c_args(argc: c_int, argv: *const *const c_char) -> Result<PathBuf, ConfigError> {
-    let argc = usize::try_from(argc).unwrap_or(0);
-    if argc == 0 || argv.is_null() {
-        return Err(ConfigError::EmptyConfigPath);
-    }
-
-    for i in 0..argc {
-        // Safety: argv is not null and has at least argc entries, so argv.add(i) *should* be valid for 0 <= i < argc.
-        let arg_ptr = unsafe { *argv.add(i) };
-        if arg_ptr.is_null() {
-            continue;
-        }
-        // Safety: arg_ptr is not null and *should* be a valid C string pointer.
-        let c_str = unsafe { CStr::from_ptr(arg_ptr) };
-        let Ok(arg) = c_str.to_str() else {
-            return Err(ConfigError::InvalidUtf8Arg);
-        };
-        if let Some(path) = arg.strip_prefix("config=") {
-            if path.is_empty() {
-                return Err(ConfigError::EmptyConfigPath);
+impl Config {
+    pub(crate) fn append_log_line(&self, line: &str) -> std::io::Result<()> {
+        if let Some(path) = &self.log_path {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
             }
-            return Ok(PathBuf::from(path));
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .and_then(|file| writeln!(&file, "{line}"))
+                .inspect_err(|e| {
+                    eprintln!(
+                        "[pam-webhook] failed to write log file path={} error={e} line={line}",
+                        path.display()
+                    );
+                })?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn log_hook_call(
+        &self,
+        hook: &str,
+        pam_h: &mut PamHandle,
+        flags: c_int,
+    ) -> Result<(), std::io::Error> {
+        // Placeholder diagnostics for future webhook integration. Keep secrets out.
+        let now = chrono::Utc::now();
+        let user = get_item(pam_h, PamItemType::USER).unwrap_or_default();
+        let mut log_line = format!("[pam-webhook] time={now} hook={hook} flags={flags}",);
+        if !user.is_empty() {
+            write!(log_line, " user={user:?}").ok();
+        }
+        let rhost = get_item(pam_h, PamItemType::RHOST).unwrap_or_default();
+        if !rhost.is_empty() {
+            write!(log_line, " rhost={rhost:?}").ok();
+        }
+        let tty = get_item(pam_h, PamItemType::TTY).unwrap_or_default();
+        if !tty.is_empty() {
+            write!(log_line, " tty={tty:?}").ok();
+        }
+        self.append_log_line(&log_line)
+    }
+}
+
+impl PamEventHandler for Config {
+    fn from_args(args: &[String]) -> Self {
+        let mut config = Config::default();
+        for arg in args {
+            if let Some(path) = arg.strip_prefix("config=") {
+                let path = PathBuf::from(path);
+                let file_text = read_to_string(&path);
+                if let Ok(text) = file_text {
+                    if let Ok(parsed) = toml::from_str(&text) {
+                        config = parsed;
+                    } else {
+                        eprintln!(
+                            "[pam-webhook] {} failed to parse config from {}",
+                            chrono::Utc::now(),
+                            path.display()
+                        );
+                    }
+                } else {
+                    eprintln!(
+                        "[pam-webhook] {} failed to read config from {}",
+                        chrono::Utc::now(),
+                        path.display()
+                    );
+                }
+            }
+        }
+        config
+    }
+
+    fn authenticate(&self, pam_h: &mut PamHandle, flags: c_int) -> pam_sys::PamReturnCode {
+        match self.log_hook_call("pam_sm_authenticate", pam_h, flags) {
+            Ok(()) => pam_sys::PamReturnCode::SUCCESS,
+            Err(_) => pam_sys::PamReturnCode::SERVICE_ERR,
         }
     }
-    Err(ConfigError::EmptyConfigPath)
-}
 
-/// # Safety
-/// See safety in [`parse_c_args`]
-#[allow(clippy::similar_names)]
-fn load_config(argc: c_int, argv: *const *const c_char) -> Result<Config, ConfigError> {
-    let path: PathBuf = parse_c_args(argc, argv)?;
-    let file_text = read_to_string(&path)?;
-    let parsed: Config = toml::from_str(&file_text)?;
-    Ok(parsed)
-}
-
-/// # Safety
-/// See safety in [`parse_c_args`]
-#[allow(clippy::similar_names)]
-pub(crate) fn load_hook_config(hook: &str, argc: c_int, argv: *const *const c_char) -> Config {
-    load_config(argc, argv).unwrap_or_else(|e| {
-        eprintln!("[pam-webhook] {hook} config load failed: {e}");
-        Config::default()
-    })
-}
-
-pub(crate) fn append_log_line(path: &Path, line: &str) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+    fn setcred(&self, pam_h: &mut PamHandle, flags: c_int) -> pam_sys::PamReturnCode {
+        match self.log_hook_call("pam_sm_setcred", pam_h, flags) {
+            Ok(()) => pam_sys::PamReturnCode::SUCCESS,
+            Err(_) => pam_sys::PamReturnCode::SERVICE_ERR,
+        }
     }
-    let result = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .and_then(|file| writeln!(&file, "{line}"));
-    result.inspect_err(|e| {
-        eprintln!(
-            "[pam-webhook] failed to write log file path={} error={e} line={line}",
-            path.display()
-        );
-    })
+
+    fn acct_mgmt(&self, pam_h: &mut PamHandle, flags: c_int) -> pam_sys::PamReturnCode {
+        match self.log_hook_call("pam_sm_acct_mgmt", pam_h, flags) {
+            Ok(()) => pam_sys::PamReturnCode::SUCCESS,
+            Err(_) => pam_sys::PamReturnCode::SERVICE_ERR,
+        }
+    }
+
+    fn open_session(&self, pam_h: &mut PamHandle, flags: c_int) -> pam_sys::PamReturnCode {
+        match self.log_hook_call("pam_sm_open_session", pam_h, flags) {
+            Ok(()) => pam_sys::PamReturnCode::SUCCESS,
+            Err(_) => pam_sys::PamReturnCode::SERVICE_ERR,
+        }
+    }
+
+    fn close_session(&self, pam_h: &mut PamHandle, flags: c_int) -> pam_sys::PamReturnCode {
+        match self.log_hook_call("pam_sm_close_session", pam_h, flags) {
+            Ok(()) => pam_sys::PamReturnCode::SUCCESS,
+            Err(_) => pam_sys::PamReturnCode::SERVICE_ERR,
+        }
+    }
+
+    fn chauthtok(&self, pam_h: &mut PamHandle, flags: c_int) -> pam_sys::PamReturnCode {
+        match self.log_hook_call("pam_sm_chauthtok", pam_h, flags) {
+            Ok(()) => pam_sys::PamReturnCode::SUCCESS,
+            Err(_) => pam_sys::PamReturnCode::SERVICE_ERR,
+        }
+    }
 }
