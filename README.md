@@ -13,7 +13,11 @@ This module exports the standard Linux-PAM service hooks:
 - `pam_sm_close_session`
 - `pam_sm_chauthtok`
 
-Current behavior is placeholder (`PAM_SUCCESS`) with diagnostic logging, intended to be extended with real policy/webhook logic.
+Current behavior is feature-gated:
+
+- no feature flags: logging mode (default)
+- `--features=log`: logging mode
+- `--features=webhook`: webhook mode
 
 ## Build for a real PAM environment (Linux)
 
@@ -31,6 +35,18 @@ Then build:
 ```bash
 cargo build --release
 ```
+
+Explicit feature builds:
+
+```bash
+# Logging mode
+cargo build --release --features=log
+
+# Webhook mode
+cargo build --release --features=webhook
+```
+
+`log` and `webhook` are mutually exclusive and cannot be enabled together.
 
 Expected artifact:
 
@@ -108,9 +124,11 @@ Current TOML fields:
 
 ```toml
 log_path = "/var/log/pam-webhook.log"
+webhook_url = "https://example.internal/pam/events"
 ```
 
-`log_path` controls where `log_hook_call` appends diagnostic entries.
+- `log_path` controls where logging mode appends diagnostic entries.
+- `webhook_url` is used by webhook mode as the destination URL for per-hook JSON POST requests.
 
 ## Ensure SSH uses PAM
 

@@ -1,10 +1,22 @@
-use pam_sys::{PamHandle, PamReturnCode};
+use pam::{PamHandle, PamReturnCode};
 use std::os::raw::{c_char, c_int};
 
 mod config;
-use config::Config;
 mod handlers;
 use handlers::PamEventHandler;
+#[cfg(not(any(feature="logging", feature="webhook")))]
+mod null;
+#[cfg(all(feature = "logging", not(feature = "webhook")))]
+mod logging;
+#[cfg(feature = "webhook")]
+mod webhook;
+
+#[cfg(not(any(feature="logging", feature="webhook")))]
+use null::NullHandler as ActiveHandler;
+#[cfg(all(feature = "logging", not(feature = "webhook")))]
+use logging::LoggingHandler as ActiveHandler;
+#[cfg(feature = "webhook")]
+use webhook::WebhookHandler as ActiveHandler;
 
 macro_rules! apply_hook {
     ($hook:ident, $target:ident) => {
@@ -20,19 +32,19 @@ macro_rules! apply_hook {
             argc: c_int,
             argv: *const *const c_char,
         ) -> c_int {
-            let config = unsafe { Config::from_c_args(argc, argv) };
+            let handler = unsafe { ActiveHandler::from_c_args(argc, argv) };
             if pamh.is_null() {
                 eprintln!(
                     "[pam-webhook] {} {} called with null pam handle",
                     chrono::Utc::now(),
                     stringify!($target)
                 );
-                PamReturnCode::SERVICE_ERR as c_int
+                PamReturnCode::Service_Err as c_int
             } else {
                 // Safety: We checked pamh for null above
                 // and PAM guarantees that the pointer will be valid for the duration of the call
                 let pam_h = unsafe { &mut *pamh };
-                config.$hook(pam_h, flags) as c_int
+                handler.$hook(pam_h, flags) as c_int
             }
         }
     };

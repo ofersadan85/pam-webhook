@@ -6,9 +6,15 @@ edition = "2024"
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+default = ["webhook"]
+logging = []
+webhook = ["dep:reqwest"]
+
 [dependencies]
 chrono = "0.4.44"
-pam-sys = "0.5.6"
+pam = "0.8.0"
+reqwest = { version = "0.13.2", default-features = false, features = ["json", "blocking"], optional = true }
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.18"
 toml = "0.9.8"

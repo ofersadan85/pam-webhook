@@ -1,11 +1,10 @@
-use pam_sys::{PamHandle, PamItemType, PamReturnCode};
+use pam::{PamHandle, PamItemType, PamReturnCode};
 use std::{
     ffi::{CStr, c_char, c_int, c_void},
-    ptr,
 };
 
 /// Trait defining the PAM event handlers. Each method corresponds to a PAM hook.
-/// The default implementation of all of them is a no-op and just returns [`PamReturnCode::SUCCESS`].
+/// The default implementation of all of them is a no-op and just returns [`PamReturnCode::Success`].
 pub(crate) trait PamEventHandler {
     /// Constructor from C args that have already been parsed into a Vec<String>
     /// The args are expected to be in the form "key=value", but this is not enforced by the type system.
@@ -29,27 +28,27 @@ pub(crate) trait PamEventHandler {
 
     /// Called by PAM during authentication (for example when sshd checks credentials).
     fn authenticate(&self, _pam_h: &mut PamHandle, _flags: c_int) -> PamReturnCode {
-        PamReturnCode::SUCCESS
+        PamReturnCode::Success
     }
     /// Called after authentication to establish, refresh, or delete credentials.
     fn setcred(&self, _pam_h: &mut PamHandle, _flags: c_int) -> PamReturnCode {
-        PamReturnCode::SUCCESS
+        PamReturnCode::Success
     }
     /// Called for account policy checks (expiration, access restrictions, time limits).
     fn acct_mgmt(&self, _pam_h: &mut PamHandle, _flags: c_int) -> PamReturnCode {
-        PamReturnCode::SUCCESS
+        PamReturnCode::Success
     }
     /// Called when a new session is opened (for sshd, after login succeeds).
     fn open_session(&self, _pam_h: &mut PamHandle, _flags: c_int) -> PamReturnCode {
-        PamReturnCode::SUCCESS
+        PamReturnCode::Success
     }
     /// Called when a session is closed (for sshd, on logout).
     fn close_session(&self, _pam_h: &mut PamHandle, _flags: c_int) -> PamReturnCode {
-        PamReturnCode::SUCCESS
+        PamReturnCode::Success
     }
     /// Called to change the user's authentication token (for example, when changing passwords).
     fn chauthtok(&self, _pam_h: &mut PamHandle, _flags: c_int) -> PamReturnCode {
-        PamReturnCode::SUCCESS
+        PamReturnCode::Success
     }
 }
 
@@ -83,12 +82,10 @@ unsafe fn parse_c_args(argc: c_int, argv: *const *const c_char) -> Vec<String> {
 
 /// Helper to get PAM items as Rust strings. Returns None if the item is not set or on error.
 pub(crate) fn get_item(pamh: &mut PamHandle, item: PamItemType) -> Option<String> {
-    let mut value_ptr: *const c_void = ptr::null();
-    let result = pam_sys::get_item(pamh, item, &mut value_ptr);
-    if result != PamReturnCode::SUCCESS || value_ptr.is_null() {
+    let Ok(value_ptr) = pam::get_item(pamh, item) else {
         return None;
-    }
-    let value_ptr = value_ptr.cast::<c_char>();
+    };
+    let value_ptr = (value_ptr as *const c_void).cast::<c_char>();
     Some(
         // SAFETY: pam_get_item returned PAM_SUCCESS and value_ptr was checked for null.
         unsafe { CStr::from_ptr(value_ptr) }
