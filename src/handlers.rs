@@ -85,7 +85,7 @@ pub(crate) fn get_item(pamh: &mut PamHandle, item: PamItemType) -> Option<String
     let Ok(value_ptr) = pam::get_item(pamh, item) else {
         return None;
     };
-    let value_ptr = (value_ptr as *const c_void).cast::<c_char>();
+    let value_ptr = std::ptr::from_ref::<c_void>(value_ptr).cast::<c_char>();
     Some(
         // SAFETY: pam_get_item returned PAM_SUCCESS and value_ptr was checked for null.
         unsafe { CStr::from_ptr(value_ptr) }

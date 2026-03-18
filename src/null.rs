@@ -8,6 +8,6 @@ impl PamEventHandler for NullHandler {
     where
         Self: Sized + Default,
     {
-        Self::default()
+        Self
     }
 }

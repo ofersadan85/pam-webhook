@@ -34,11 +34,6 @@ macro_rules! apply_hook {
         ) -> c_int {
             let handler = unsafe { ActiveHandler::from_c_args(argc, argv) };
             if pamh.is_null() {
-                eprintln!(
-                    "[pam-webhook] {} {} called with null pam handle",
-                    chrono::Utc::now(),
-                    stringify!($target)
-                );
                 PamReturnCode::Service_Err as c_int
             } else {
                 // Safety: We checked pamh for null above

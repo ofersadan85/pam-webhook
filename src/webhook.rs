@@ -33,7 +33,7 @@ impl WebhookHandler {
     ) -> Result<(), HookError> {
         let url = self.webhook_url.as_deref().unwrap_or_default();
         if url.is_empty() {
-             return Err(HookError::MissingWebhookUrl);
+            return Err(HookError::MissingWebhookUrl);
         }
         let payload = HookPayload {
             hook,
@@ -53,13 +53,7 @@ impl WebhookHandler {
     fn handle_hook(&self, hook: &str, pam_h: &mut PamHandle, flags: c_int) -> PamReturnCode {
         match self.send_hook_call(hook, pam_h, flags) {
             Ok(()) => PamReturnCode::Success,
-            Err(err) => {
-                eprintln!(
-                    "[pam-webhook] {} webhook request failed hook={hook} error={err}",
-                    chrono::Utc::now()
-                );
-                PamReturnCode::Service_Err
-            }
+            Err(_) => PamReturnCode::Service_Err,
         }
     }
 }

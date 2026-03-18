@@ -21,13 +21,7 @@ impl LoggingHandler {
                 .create(true)
                 .append(true)
                 .open(path)
-                .and_then(|file| writeln!(&file, "{line}"))
-                .inspect_err(|e| {
-                    eprintln!(
-                        "[pam-webhook] failed to write log file path={} error={e} line={line}",
-                        path.display()
-                    );
-                })?;
+                .and_then(|file| writeln!(&file, "{line}"))?;
         }
         Ok(())
     }
