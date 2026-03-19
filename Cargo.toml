@@ -24,6 +24,9 @@ toml = "1.0.7"
 libloading = "0.9.0"
 tempfile = "3.27.0"
 
+[patch.crates-io]
+pam = { git = "https://github.com/1wilkens/pam", rev = "daf26ae3512d8e5a7478ccff1e4232ef5ebf9b03" }
+
 # [lints.rust]
 # unused_imports = "allow"
 # dead_code = "allow"
