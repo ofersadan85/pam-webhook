@@ -4,17 +4,17 @@ use std::os::raw::{c_char, c_int};
 mod config;
 mod handlers;
 use handlers::PamEventHandler;
-#[cfg(not(any(feature="logging", feature="webhook")))]
-mod null;
 #[cfg(all(feature = "logging", not(feature = "webhook")))]
 mod logging;
+#[cfg(not(any(feature = "logging", feature = "webhook")))]
+mod null;
 #[cfg(feature = "webhook")]
 mod webhook;
 
-#[cfg(not(any(feature="logging", feature="webhook")))]
-use null::NullHandler as ActiveHandler;
 #[cfg(all(feature = "logging", not(feature = "webhook")))]
 use logging::LoggingHandler as ActiveHandler;
+#[cfg(not(any(feature = "logging", feature = "webhook")))]
+use null::NullHandler as ActiveHandler;
 #[cfg(feature = "webhook")]
 use webhook::WebhookHandler as ActiveHandler;
 
@@ -51,3 +51,27 @@ apply_hook!(acct_mgmt, pam_sm_acct_mgmt);
 apply_hook!(open_session, pam_sm_open_session);
 apply_hook!(close_session, pam_sm_close_session);
 apply_hook!(chauthtok, pam_sm_chauthtok);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ptr;
+
+    fn assert_null_handle_returns_service_err(
+        hook: unsafe extern "C" fn(*mut PamHandle, c_int, c_int, *const *const c_char) -> c_int,
+    ) {
+        // SAFETY: FFI hook is expected to handle null pamh safely and return service error.
+        let rc = unsafe { hook(ptr::null_mut(), 0, 0, ptr::null()) };
+        assert_eq!(rc, PamReturnCode::Service_Err as c_int);
+    }
+
+    #[test]
+    fn all_hooks_return_service_err_for_null_handle() {
+        assert_null_handle_returns_service_err(pam_sm_authenticate);
+        assert_null_handle_returns_service_err(pam_sm_setcred);
+        assert_null_handle_returns_service_err(pam_sm_acct_mgmt);
+        assert_null_handle_returns_service_err(pam_sm_open_session);
+        assert_null_handle_returns_service_err(pam_sm_close_session);
+        assert_null_handle_returns_service_err(pam_sm_chauthtok);
+    }
+}

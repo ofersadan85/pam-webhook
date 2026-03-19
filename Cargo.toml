@@ -19,6 +19,10 @@ serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.18"
 toml = "0.9.8"
 
+[dev-dependencies]
+libloading = "0.9.0"
+tempfile = "3.27.0"
+
 # [lints.rust]
 # unused_imports = "allow"
 # dead_code = "allow"

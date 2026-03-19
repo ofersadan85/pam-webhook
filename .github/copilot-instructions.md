@@ -4,15 +4,12 @@
 
 - Build release Linux PAM module:
   - `cargo build --release`
-  - Output artifact: `target/release/libpam_webhook.so`
-- Run all tests:
-  - `cargo test`
-- Run a single test (name filter):
-  - `cargo test <test_name_substring>`
-- Lint (if Clippy is available in the toolchain):
-  - `cargo clippy --all-targets --all-features -- -D warnings`
-- Format check:
-  - `cargo fmt -- --check`
+  - See `.justfile`
+  - Output artifact: `~/.cargo/target/release/libpam_webhook.so`
+- Run complete test matrix (all feature modes):
+  - `just test`
+- Run all validation checks (format + lint):
+  - `just check`
 
 ## High-level architecture
 

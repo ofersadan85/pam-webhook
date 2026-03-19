@@ -15,8 +15,8 @@ This module exports the standard Linux-PAM service hooks:
 
 Current behavior is feature-gated:
 
-- no feature flags: logging mode (default)
-- `--features=log`: logging mode
+- no feature flags: null/no-op mode
+- `--features=logging` with `--no-default-features`: logging mode
 - `--features=webhook`: webhook mode
 
 ## Build for a real PAM environment (Linux)
@@ -40,13 +40,33 @@ Explicit feature builds:
 
 ```bash
 # Logging mode
-cargo build --release --features=log
+cargo build --release --no-default-features --features=logging
 
 # Webhook mode
 cargo build --release --features=webhook
+
+# Null/no-op mode
+cargo build --release --no-default-features
 ```
 
-`log` and `webhook` are mutually exclusive and cannot be enabled together.
+`logging` and `webhook` are mutually exclusive and should not be enabled together.
+
+## Test matrix
+
+Run tests in all supported build modes:
+
+```bash
+# Default webhook mode
+cargo test
+
+# Logging mode
+cargo test --no-default-features --features logging
+
+# Null/no-op mode
+cargo test --no-default-features
+```
+
+Integration tests include dynamic loading of the built `.so` and invocation of all exported PAM hooks.
 
 Expected artifact:
 

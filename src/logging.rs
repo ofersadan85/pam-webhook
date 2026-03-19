@@ -86,3 +86,35 @@ impl PamEventHandler for LoggingHandler {
         self.handle_hook("pam_sm_chauthtok", pam_h, flags)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::LoggingHandler;
+    use tempfile::tempdir;
+
+    #[test]
+    fn append_log_line_creates_parent_dirs_and_appends() {
+        let tmp = tempdir().expect("create temp dir");
+        let log_path = tmp.path().join("nested/path/pam.log");
+        let handler = LoggingHandler {
+            log_path: Some(log_path.clone()),
+        };
+
+        handler.append_log_line("first").expect("append first line");
+        handler
+            .append_log_line("second")
+            .expect("append second line");
+
+        let content = std::fs::read_to_string(log_path).expect("read log file");
+        assert!(content.contains("first"));
+        assert!(content.contains("second"));
+    }
+
+    #[test]
+    fn append_log_line_noop_when_log_path_missing() {
+        let handler = LoggingHandler { log_path: None };
+        handler
+            .append_log_line("this line is intentionally ignored")
+            .expect("none path should be a no-op");
+    }
+}

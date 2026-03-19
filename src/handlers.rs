@@ -1,7 +1,5 @@
-use pam::{PamHandle, PamItemType, PamReturnCode};
-use std::{
-    ffi::{CStr, c_char, c_int, c_void},
-};
+use pam::{PamHandle, PamReturnCode};
+use std::ffi::{CStr, c_char, c_int};
 
 /// Trait defining the PAM event handlers. Each method corresponds to a PAM hook.
 /// The default implementation of all of them is a no-op and just returns [`PamReturnCode::Success`].
@@ -81,15 +79,70 @@ unsafe fn parse_c_args(argc: c_int, argv: *const *const c_char) -> Vec<String> {
 }
 
 /// Helper to get PAM items as Rust strings. Returns None if the item is not set or on error.
-pub(crate) fn get_item(pamh: &mut PamHandle, item: PamItemType) -> Option<String> {
+#[cfg(any(feature = "logging", feature = "webhook"))]
+pub(crate) fn get_item(pamh: &mut pam::PamHandle, item: pam::PamItemType) -> Option<String> {
     let Ok(value_ptr) = pam::get_item(pamh, item) else {
         return None;
     };
-    let value_ptr = std::ptr::from_ref::<c_void>(value_ptr).cast::<c_char>();
+    let value_ptr = std::ptr::from_ref::<std::ffi::c_void>(value_ptr).cast::<c_char>();
     Some(
         // SAFETY: pam_get_item returned PAM_SUCCESS and value_ptr was checked for null.
         unsafe { CStr::from_ptr(value_ptr) }
             .to_string_lossy()
             .into_owned(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PamEventHandler, parse_c_args};
+    use std::ffi::{CString, c_char, c_int};
+
+    #[derive(Debug, Default)]
+    struct DummyHandler {
+        argc_seen: usize,
+    }
+
+    impl PamEventHandler for DummyHandler {
+        fn from_args(args: &[String]) -> Self {
+            Self {
+                argc_seen: args.len(),
+            }
+        }
+    }
+
+    #[test]
+    fn parse_c_args_handles_nulls_and_invalid_utf8() {
+        let normal = CString::new("config=/tmp/a.toml").expect("valid cstr");
+        let invalid_utf8 =
+            CString::from_vec_with_nul(vec![0xff, 0x00]).expect("invalid utf8 bytes");
+
+        let argv = [
+            normal.as_ptr(),
+            std::ptr::null::<c_char>(),
+            invalid_utf8.as_ptr(),
+        ];
+
+        // SAFETY: argv points to 3 stable C string pointers for the duration of the call.
+        let parsed = unsafe { parse_c_args(3, argv.as_ptr()) };
+        assert_eq!(parsed, vec!["config=/tmp/a.toml".to_string()]);
+    }
+
+    #[test]
+    fn parse_c_args_handles_negative_argc() {
+        // SAFETY: argv is null and argc is invalid/negative, function should handle gracefully.
+        let parsed = unsafe { parse_c_args(-1, std::ptr::null()) };
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn from_c_args_passes_parsed_args_to_from_args() {
+        let arg1 = CString::new("a=1").expect("valid cstr");
+        let arg2 = CString::new("b=2").expect("valid cstr");
+        let arg_values = [arg1.as_ptr(), arg2.as_ptr()];
+
+        // SAFETY: arg_values points to 2 valid C string pointers.
+        let handler = unsafe { DummyHandler::from_c_args(2 as c_int, arg_values.as_ptr()) };
+        assert_eq!(handler.argc_seen, 2);
+    }
 }
