@@ -12,12 +12,18 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    env:
+      LLVM_CONFIG_PATH: /usr/bin/llvm-config-18
+      LIBCLANG_PATH: /usr/lib/x86_64-linux-gnu/
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install PAM headers
-        run: sudo apt-get update && sudo apt-get install -y libpam0g-dev
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libpam0g-dev clang
+
+      - name: Link clang
+        run: sudo ln -s /usr/lib/x86_64-linux-gnu/libclang-18.so.18 /usr/lib/x86_64-linux-gnu/libclang.so
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -33,20 +39,26 @@ jobs:
 
       - name: Tests
         run: |
-          cargo test --all-features {{tests}}
-          cargo test --no-default-features {{tests}}
-          cargo test --no-default-features --features=logging {{tests}}
-          cargo test --no-default-features --features=webhook {{tests}}
+          cargo test --all-features
+          cargo test --no-default-features
+          cargo test --no-default-features --features=logging
+          cargo test --no-default-features --features=webhook
 
   release:
     needs: validate
     runs-on: ubuntu-latest
+    env:
+      LLVM_CONFIG_PATH: /usr/bin/llvm-config-18
+      LIBCLANG_PATH: /usr/lib/x86_64-linux-gnu/
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install PAM headers
-        run: sudo apt-get update && sudo apt-get install -y libpam0g-dev
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libpam0g-dev clang
+
+      - name: Link clang
+        run: sudo ln -s /usr/lib/x86_64-linux-gnu/libclang-18.so.18 /usr/lib/x86_64-linux-gnu/libclang.so
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -57,7 +69,7 @@ jobs:
       - name: Build pam_logging.so
         run: |
           cargo build --release --no-default-features --features=logging
-          cp target/release/libpam_logging.so target/release/pam_logging.so
+          cp target/release/libpam_webhook.so target/release/pam_logging.so
 
       - name: Build pam_webhook.so
         run: |
