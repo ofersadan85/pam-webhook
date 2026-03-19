@@ -13,6 +13,7 @@ webhook = ["dep:reqwest"]
 
 [dependencies]
 chrono = "0.4.44"
+hostname = "0.4.2"
 pam = "0.8.0"
 reqwest = { version = "0.13.2", default-features = false, features = ["json", "blocking", "rustls"], optional = true }
 serde = { version = "1.0.228", features = ["derive"] }

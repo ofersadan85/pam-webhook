@@ -2,6 +2,7 @@ use crate::{
     config::from_toml_config_args,
     handlers::{PamEventHandler, get_item},
 };
+use hostname::get as get_hostname;
 use pam::{PamHandle, PamItemType, PamReturnCode};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,7 @@ pub(crate) struct WebhookHandler {
 struct HookPayload<'a> {
     hook: &'a str,
     flags: c_int,
+    hostname: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     user: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -39,6 +41,10 @@ impl WebhookHandler {
         let payload = HookPayload {
             hook,
             flags,
+            hostname: get_hostname()
+                .ok()
+                .and_then(|name| name.into_string().ok())
+                .unwrap_or_default(),
             user: get_item(pam_h, PamItemType::User),
             rhost: get_item(pam_h, PamItemType::RHost),
             tty: get_item(pam_h, PamItemType::TTY),
@@ -276,6 +282,7 @@ mod tests {
         let body = join.join().expect("server thread joined");
         assert!(body.contains("\"hook\":\"pam_sm_authenticate\""));
         assert!(body.contains("\"flags\":42"));
+        assert!(body.contains("\"hostname\":"));
         assert!(body.contains("\"user\":\"alice\""));
         assert!(body.contains("\"rhost\":\"10.0.0.9\""));
         assert!(body.contains("\"tty\":\"pts/1\""));
