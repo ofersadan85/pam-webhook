@@ -80,11 +80,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="main-${GITHUB_SHA}"
-          TITLE="main ${GITHUB_SHA}"
+          TAG="main-r${GITHUB_RUN_NUMBER}"
+          TITLE="main build #${GITHUB_RUN_NUMBER}"
           gh release create "$TAG" \
             --repo "${GITHUB_REPOSITORY}" \
             --title "$TITLE" \
-            --notes "Automated release for commit ${GITHUB_SHA} on main." \
+            --notes "Automated release for run #${GITHUB_RUN_NUMBER} on main (${GITHUB_SHA})." \
             target/release/pam_webhook.so \
             target/release/pam_logging.so

@@ -2,6 +2,13 @@
 
 Rust PAM service module scaffold for `sshd`.
 
+## Latest release assets
+
+Download links that always point to assets from the most recent GitHub release:
+
+- [`pam_webhook.so`](https://github.com/ofersadan85/pam-webhook/releases/latest/download/pam_webhook.so)
+- [`pam_logging.so`](https://github.com/ofersadan85/pam-webhook/releases/latest/download/pam_logging.so)
+
 ## What this module exports
 
 This module exports the standard Linux-PAM service hooks:
