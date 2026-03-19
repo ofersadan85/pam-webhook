@@ -152,10 +152,15 @@ Current TOML fields:
 ```toml
 log_path = "/var/log/pam-webhook.log"
 webhook_url = "https://example.internal/pam/events"
+exclude_rhosts = ["192.0.2.10", "10.0.0.9"]
+exclude_users = ["root", "svc-backup"]
 ```
 
 - `log_path` controls where logging mode appends diagnostic entries.
 - `webhook_url` is used by webhook mode as the destination URL for per-hook JSON POST requests.
+- `exclude_rhosts` is a list of remote host/IP values; if PAM `rhost` matches any entry, webhook POST is skipped.
+- `exclude_users` is a list of usernames; if PAM `user` matches any entry, webhook POST is skipped.
+- Exclusion uses OR semantics: a request is skipped when either `rhost` matches `exclude_rhosts` or `user` matches `exclude_users`.
 
 ## Ensure SSH uses PAM
 

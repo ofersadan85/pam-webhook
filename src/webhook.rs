@@ -12,6 +12,10 @@ use std::{ffi::c_int, fs::OpenOptions, io::Write as _, path::PathBuf};
 pub(crate) struct WebhookHandler {
     pub(crate) log_path: Option<PathBuf>,
     pub(crate) webhook_url: Option<String>,
+    #[serde(default)]
+    pub(crate) exclude_rhosts: Vec<String>,
+    #[serde(default)]
+    pub(crate) exclude_users: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -28,6 +32,11 @@ struct HookPayload<'a> {
 }
 
 impl WebhookHandler {
+    fn is_excluded(&self, user: Option<&str>, rhost: Option<&str>) -> bool {
+        rhost.is_some_and(|value| self.exclude_rhosts.iter().any(|excluded| excluded == value))
+            || user.is_some_and(|value| self.exclude_users.iter().any(|excluded| excluded == value))
+    }
+
     fn send_hook_call(
         &self,
         hook: &str,
@@ -38,6 +47,12 @@ impl WebhookHandler {
         if url.is_empty() {
             return Err(HookError::MissingWebhookUrl);
         }
+
+        let user = get_item(pam_h, PamItemType::User);
+        let rhost = get_item(pam_h, PamItemType::RHost);
+        if self.is_excluded(user.as_deref(), rhost.as_deref()) {
+            return Ok(());
+        }
         let payload = HookPayload {
             hook,
             flags,
@@ -45,8 +60,8 @@ impl WebhookHandler {
                 .ok()
                 .and_then(|name| name.into_string().ok())
                 .unwrap_or_default(),
-            user: get_item(pam_h, PamItemType::User),
-            rhost: get_item(pam_h, PamItemType::RHost),
+            user,
+            rhost,
             tty: get_item(pam_h, PamItemType::TTY),
         };
         Client::new()
@@ -265,6 +280,8 @@ mod tests {
         let handler = WebhookHandler {
             log_path: None,
             webhook_url: Some(url),
+            exclude_rhosts: Vec::new(),
+            exclude_users: Vec::new(),
         };
 
         let mut session = PamSession::start();
@@ -294,6 +311,8 @@ mod tests {
         let handler = WebhookHandler {
             log_path: None,
             webhook_url: Some(url),
+            exclude_rhosts: Vec::new(),
+            exclude_users: Vec::new(),
         };
         let mut session = PamSession::start();
         let user = CString::new("alice").expect("cstr");
@@ -311,5 +330,57 @@ mod tests {
             HookError::Request(_) => {}
         }
         let _ = join.join().expect("server thread joined");
+    }
+
+    #[test]
+    fn send_hook_call_skips_when_rhost_is_excluded() {
+        let handler = WebhookHandler {
+            log_path: None,
+            webhook_url: Some("http://127.0.0.1:9".to_string()),
+            exclude_rhosts: vec!["10.0.0.9".to_string()],
+            exclude_users: vec!["bob".to_string()],
+        };
+        let mut session = PamSession::start();
+        let user = CString::new("alice").expect("cstr");
+        let rhost = CString::new("10.0.0.9").expect("cstr");
+        session.set_item(pam::PamItemType::User, &user);
+        session.set_item(pam::PamItemType::RHost, &rhost);
+
+        handler
+            .send_hook_call("pam_sm_open_session", session.handle_mut(), 1)
+            .expect("excluded rhost should skip webhook call");
+    }
+
+    #[test]
+    fn send_hook_call_skips_when_user_is_excluded() {
+        let handler = WebhookHandler {
+            log_path: None,
+            webhook_url: Some("http://127.0.0.1:9".to_string()),
+            exclude_rhosts: vec!["10.0.0.9".to_string()],
+            exclude_users: vec!["alice".to_string()],
+        };
+        let mut session = PamSession::start();
+        let user = CString::new("alice").expect("cstr");
+        let rhost = CString::new("10.0.0.10").expect("cstr");
+        session.set_item(pam::PamItemType::User, &user);
+        session.set_item(pam::PamItemType::RHost, &rhost);
+
+        handler
+            .send_hook_call("pam_sm_open_session", session.handle_mut(), 1)
+            .expect("excluded user should skip webhook call");
+    }
+
+    #[test]
+    fn exclusion_uses_or_semantics() {
+        let handler = WebhookHandler {
+            log_path: None,
+            webhook_url: Some("http://127.0.0.1:9".to_string()),
+            exclude_rhosts: vec!["10.0.0.9".to_string()],
+            exclude_users: vec!["alice".to_string()],
+        };
+
+        assert!(handler.is_excluded(Some("alice"), Some("10.0.0.10")));
+        assert!(handler.is_excluded(Some("bob"), Some("10.0.0.9")));
+        assert!(!handler.is_excluded(Some("bob"), Some("10.0.0.10")));
     }
 }
