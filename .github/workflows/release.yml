@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install PAM headers
+        run: sudo apt-get update && sudo apt-get install -y libpam0g-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Tests
+        run: |
+          cargo test --all-features {{tests}}
+          cargo test --no-default-features {{tests}}
+          cargo test --no-default-features --features=logging {{tests}}
+          cargo test --no-default-features --features=webhook {{tests}}
+
+  release:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install PAM headers
+        run: sudo apt-get update && sudo apt-get install -y libpam0g-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build pam_logging.so
+        run: |
+          cargo build --release --no-default-features --features=logging
+          cp target/release/libpam_logging.so target/release/pam_logging.so
+
+      - name: Build pam_webhook.so
+        run: |
+          cargo build --release --no-default-features --features=webhook
+          cp target/release/libpam_webhook.so target/release/pam_webhook.so
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="main-${GITHUB_SHA}"
+          TITLE="main ${GITHUB_SHA}"
+          gh release create "$TAG" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "$TITLE" \
+            --notes "Automated release for commit ${GITHUB_SHA} on main." \
+            target/release/pam_webhook.so \
+            target/release/pam_logging.so
