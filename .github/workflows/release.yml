@@ -80,8 +80,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="main-r${GITHUB_RUN_NUMBER}"
-          TITLE="main build #${GITHUB_RUN_NUMBER}"
+          VERSION="$(awk -F '"' '/^version = "/ { print $2; exit }' Cargo.toml)"
+          TAG="v${VERSION}-r${GITHUB_RUN_NUMBER}"
+          TITLE="v${VERSION}-r${GITHUB_RUN_NUMBER}"
           gh release create "$TAG" \
             --repo "${GITHUB_REPOSITORY}" \
             --title "$TITLE" \
