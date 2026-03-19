@@ -1,22 +1,8 @@
 use pam::{PamHandle, PamReturnCode};
 use std::os::raw::{c_char, c_int};
 
-mod config;
 mod handlers;
-use handlers::PamEventHandler;
-#[cfg(all(feature = "logging", not(feature = "webhook")))]
-mod logging;
-#[cfg(not(any(feature = "logging", feature = "webhook")))]
-mod null;
-#[cfg(feature = "webhook")]
-mod webhook;
-
-#[cfg(all(feature = "logging", not(feature = "webhook")))]
-use logging::LoggingHandler as ActiveHandler;
-#[cfg(not(any(feature = "logging", feature = "webhook")))]
-use null::NullHandler as ActiveHandler;
-#[cfg(feature = "webhook")]
-use webhook::WebhookHandler as ActiveHandler;
+use handlers::{MultiHandler, PamEventHandler};
 
 macro_rules! apply_hook {
     ($hook:ident, $target:ident) => {
@@ -32,7 +18,7 @@ macro_rules! apply_hook {
             argc: c_int,
             argv: *const *const c_char,
         ) -> c_int {
-            let handler = unsafe { ActiveHandler::from_c_args(argc, argv) };
+            let handler = unsafe { MultiHandler::from_c_args(argc, argv) };
             if pamh.is_null() {
                 PamReturnCode::Service_Err as c_int
             } else {

@@ -1,7 +1,4 @@
-use crate::{
-    config::from_toml_config_args,
-    handlers::{PamEventHandler, get_item},
-};
+use crate::handlers::{PamEventHandler, config::from_toml_config_args, get_item};
 use hostname::get as get_hostname;
 use pam::{PamHandle, PamItemType, PamReturnCode};
 use reqwest::blocking::Client;

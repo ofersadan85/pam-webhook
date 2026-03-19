@@ -32,11 +32,23 @@ fn so_path() -> PathBuf {
             let mut cmd = Command::new("cargo");
             cmd.arg("build").arg("--release");
 
+            #[cfg(all(feature = "logging", feature = "webhook"))]
+            {
+                cmd.arg("--all-features");
+            }
+
             #[cfg(all(feature = "logging", not(feature = "webhook")))]
             {
                 cmd.arg("--no-default-features")
                     .arg("--features")
                     .arg("logging");
+            }
+
+            #[cfg(all(feature = "webhook", not(feature = "logging")))]
+            {
+                cmd.arg("--no-default-features")
+                    .arg("--features")
+                    .arg("webhook");
             }
 
             #[cfg(not(any(feature = "logging", feature = "webhook")))]
@@ -78,10 +90,7 @@ fn load_release_library() -> Library {
     unsafe { Library::new(path) }.expect("load libpam_webhook.so")
 }
 
-#[cfg(any(
-    feature = "webhook",
-    all(feature = "logging", not(feature = "webhook"))
-))]
+#[cfg(any(feature = "webhook", feature = "logging"))]
 fn build_argv(args: &[String]) -> (Vec<CString>, Vec<*const c_char>) {
     let c_strings = args
         .iter()
@@ -235,7 +244,7 @@ fn logging_mode_hooks_write_log_lines_for_all_exports() {
     }
 }
 
-#[cfg(feature = "webhook")]
+#[cfg(all(feature = "webhook", not(feature = "logging")))]
 #[test]
 fn webhook_mode_hooks_emit_http_payloads_for_all_exports() {
     let lib = load_release_library();
@@ -309,9 +318,99 @@ fn webhook_mode_hooks_emit_http_payloads_for_all_exports() {
     }
 }
 
+#[cfg(all(feature = "logging", feature = "webhook"))]
+#[test]
+fn combined_mode_hooks_emit_http_payloads_and_write_log_lines_for_all_exports() {
+    let lib = load_release_library();
+    let mut session = PamSession::start();
+    session.set_item(
+        pam::PamItemType::User,
+        &CString::new("alice").expect("user cstr"),
+    );
+    session.set_item(
+        pam::PamItemType::RHost,
+        &CString::new("192.0.2.10").expect("rhost cstr"),
+    );
+    session.set_item(
+        pam::PamItemType::TTY,
+        &CString::new("pts/0").expect("tty cstr"),
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind webhook capture server");
+    let addr = listener.local_addr().expect("get local addr");
+    let join = thread::spawn(move || {
+        let mut bodies = Vec::new();
+        for _ in 0..HOOKS.len() {
+            let (mut stream, _) = listener.accept().expect("accept webhook");
+            let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+
+            let mut content_length = 0usize;
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).expect("read header line");
+                if line == "\r\n" {
+                    break;
+                }
+                let lower = line.to_ascii_lowercase();
+                if let Some(value) = lower.strip_prefix("content-length:") {
+                    content_length = value.trim().parse::<usize>().expect("parse content-length");
+                }
+            }
+
+            let mut body = vec![0_u8; content_length];
+            reader.read_exact(&mut body).expect("read request body");
+            bodies.push(String::from_utf8(body).expect("UTF-8 JSON payload"));
+
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .expect("write response");
+            stream.flush().expect("flush response");
+        }
+        bodies
+    });
+
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let log_path = tmp.path().join("pam/hook.log");
+    let cfg_path = tmp.path().join("pam-webhook.toml");
+    std::fs::write(
+        &cfg_path,
+        format!(
+            "log_path = \"{}\"\nwebhook_url = \"http://{addr}\"\n",
+            log_path.display()
+        ),
+    )
+    .expect("write config");
+    let module_args = vec![format!("config={}", cfg_path.display())];
+    let (_arg_storage, arg_ptrs) = build_argv(&module_args);
+
+    for hook_name in HOOKS {
+        let hook = load_hook(&lib, hook_name);
+        // SAFETY: handle and argv remain valid across the FFI boundary.
+        let argc = c_int::try_from(arg_ptrs.len()).expect("argv length must fit in c_int");
+        let rc = unsafe { hook(session.handle, 123, argc, arg_ptrs.as_ptr()) };
+        assert_eq!(rc, PamReturnCode::Success as c_int, "{hook_name} failed");
+    }
+
+    let bodies = join.join().expect("webhook server should finish");
+    assert_eq!(bodies.len(), HOOKS.len(), "one request per hook expected");
+    for (body, hook_name) in bodies.iter().zip(HOOKS.iter()) {
+        assert!(body.contains(&format!("\"hook\":\"{hook_name}\"")));
+        assert!(body.contains("\"flags\":123"));
+        assert!(body.contains("\"user\":\"alice\""));
+    }
+
+    let content = std::fs::read_to_string(log_path).expect("read generated log");
+    for hook_name in HOOKS {
+        assert!(
+            content.contains(hook_name),
+            "missing log line for {hook_name}"
+        );
+    }
+}
+
 #[cfg(not(any(feature = "logging", feature = "webhook")))]
 #[test]
-fn nullhandler_mode_all_hooks_return_success_with_valid_handle() {
+fn empty_features_hooks_return_success_with_valid_handle() {
     let lib = load_release_library();
     let mut session = PamSession::start();
 

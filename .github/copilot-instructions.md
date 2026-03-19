@@ -5,10 +5,15 @@
 - Build release Linux PAM module:
   - `cargo build --release`
   - See `.justfile`
-  - Output artifact: `~/.cargo/target/release/libpam_webhook.so`
+  - Output artifact: `target/release/libpam_webhook.so`
+- Build specific modes:
+  - null/no-op: `cargo build --release --no-default-features`
+  - logging-only: `cargo build --release --no-default-features --features=logging`
+  - webhook-only: `cargo build --release --no-default-features --features=webhook`
+  - combined logging+webhook: `cargo build --release --all-features`
 - Run complete test matrix (all feature modes):
   - `just test`
-- Run all validation checks (format + lint):
+- Run all validation checks (format + lint + matrix):
   - `just check`
 
 ## High-level architecture
@@ -16,17 +21,22 @@
 - This crate is a Rust `cdylib` intended to be loaded by Linux-PAM (configured in PAM as `pam_webhook.so`).
 - `src/lib.rs` exports all six Linux-PAM service hooks:
   - `pam_sm_authenticate`, `pam_sm_setcred`, `pam_sm_acct_mgmt`, `pam_sm_open_session`, `pam_sm_close_session`, `pam_sm_chauthtok`.
-- Every hook currently follows the same flow:
-  - call `log_hook_call(...)` for diagnostics,
-  - return a success status via `success_code()`.
-- The crate is Linux-only and uses `pam-sys` directly:
+- `src/handlers/mod.rs` defines:
+  - `PamEventHandler` trait with default no-op hook methods.
+  - `MultiHandler`, which composes enabled handlers and executes each hook in order.
+- Feature behavior is additive:
+  - no features: no handlers active, hooks return success with no side effects
+  - `logging`: `LoggingHandler`
+  - `webhook`: `WebhookHandler`
+  - `logging + webhook`: both handlers are active via `MultiHandler`
+- Integration tests in `tests/ffi_hooks.rs` validate feature-mode side effects from the built `.so`.
 
 ## Key conventions in this repo
 
 - Treat this as a scaffold: hooks intentionally return success while webhook/policy logic is added incrementally.
 - Keep exported FFI hooks ABI-stable:
   - preserve `#[unsafe(no_mangle)] pub extern "C"` signatures and PAM hook names exactly.
-- Reuse shared helpers (`log_hook_call`, `get_item`, `success_code`) instead of per-hook custom logic when adding behavior.
+- Reuse shared helpers (for example `get_item` and config parsing) instead of per-hook custom logic when adding behavior.
 - Avoid logging secrets; existing diagnostics only include hook name, flags, and selected PAM metadata.
 - Assume Linux-only operation; do not add non-Linux stubs or platform fallbacks.
-- `handlers.rs` defines the `PamEventHandler` trait with default no-op implementations for all hooks, which can be overridden as needed for future logic.
+- Prefer mode-aware tests that verify observable behavior for each feature combination, including `--all-features`.

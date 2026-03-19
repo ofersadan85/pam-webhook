@@ -7,7 +7,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [features]
-default = ["webhook"]
+default = ["logging","webhook"]
 logging = []
 webhook = ["dep:reqwest"]
 

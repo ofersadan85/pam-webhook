@@ -1,6 +1,13 @@
 use pam::{PamHandle, PamReturnCode};
 use std::ffi::{CStr, c_char, c_int};
 
+#[cfg(any(feature = "logging", feature = "webhook"))]
+mod config;
+#[cfg(feature = "logging")]
+mod logging;
+#[cfg(feature = "webhook")]
+mod webhook;
+
 /// Trait defining the PAM event handlers. Each method corresponds to a PAM hook.
 /// The default implementation of all of them is a no-op and just returns [`PamReturnCode::Success`].
 pub(crate) trait PamEventHandler {
@@ -91,6 +98,86 @@ pub(crate) fn get_item(pamh: &mut pam::PamHandle, item: pam::PamItemType) -> Opt
             .to_string_lossy()
             .into_owned(),
     )
+}
+
+#[derive(Default)]
+pub(crate) struct MultiHandler {
+    handlers: Vec<Box<dyn PamEventHandler>>,
+}
+
+impl PamEventHandler for MultiHandler {
+    #[allow(clippy::vec_init_then_push, unused)]
+    fn from_args(args: &[String]) -> Self
+    where
+        Self: Sized + Default,
+    {
+        let mut handlers: Vec<Box<dyn PamEventHandler>> = Vec::new();
+        #[cfg(feature = "logging")]
+        handlers.push(Box::new(logging::LoggingHandler::from_args(args)));
+        #[cfg(feature = "webhook")]
+        handlers.push(Box::new(webhook::WebhookHandler::from_args(args)));
+        Self { handlers }
+    }
+
+    fn authenticate(&self, pamh: &mut PamHandle, flags: i32) -> PamReturnCode {
+        for handler in &self.handlers {
+            let result = handler.authenticate(pamh, flags);
+            if result != PamReturnCode::Success {
+                return result;
+            }
+        }
+        PamReturnCode::Success
+    }
+
+    fn setcred(&self, pamh: &mut PamHandle, flags: i32) -> PamReturnCode {
+        for handler in &self.handlers {
+            let result = handler.setcred(pamh, flags);
+            if result != PamReturnCode::Success {
+                return result;
+            }
+        }
+        PamReturnCode::Success
+    }
+
+    fn acct_mgmt(&self, pamh: &mut PamHandle, flags: i32) -> PamReturnCode {
+        for handler in &self.handlers {
+            let result = handler.acct_mgmt(pamh, flags);
+            if result != PamReturnCode::Success {
+                return result;
+            }
+        }
+        PamReturnCode::Success
+    }
+
+    fn open_session(&self, pamh: &mut PamHandle, flags: i32) -> PamReturnCode {
+        for handler in &self.handlers {
+            let result = handler.open_session(pamh, flags);
+            if result != PamReturnCode::Success {
+                return result;
+            }
+        }
+        PamReturnCode::Success
+    }
+
+    fn close_session(&self, pamh: &mut PamHandle, flags: i32) -> PamReturnCode {
+        for handler in &self.handlers {
+            let result = handler.close_session(pamh, flags);
+            if result != PamReturnCode::Success {
+                return result;
+            }
+        }
+        PamReturnCode::Success
+    }
+
+    fn chauthtok(&self, pamh: &mut PamHandle, flags: i32) -> PamReturnCode {
+        for handler in &self.handlers {
+            let result = handler.chauthtok(pamh, flags);
+            if result != PamReturnCode::Success {
+                return result;
+            }
+        }
+        PamReturnCode::Success
+    }
 }
 
 #[cfg(test)]

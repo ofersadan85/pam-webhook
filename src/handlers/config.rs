@@ -1,4 +1,3 @@
-#[cfg(any(feature = "logging", feature = "webhook", test))]
 pub(crate) fn from_toml_config_args<T>(args: &[String]) -> T
 where
     T: Default + for<'de> serde::Deserialize<'de>,

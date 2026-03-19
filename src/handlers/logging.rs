@@ -1,7 +1,4 @@
-use crate::{
-    config::from_toml_config_args,
-    handlers::{PamEventHandler, get_item},
-};
+use crate::handlers::{PamEventHandler, config::from_toml_config_args, get_item};
 use pam::{PamHandle, PamItemType, PamReturnCode};
 use serde::Deserialize;
 use std::{ffi::c_int, fmt::Write as _, fs::OpenOptions, io::Write as _, path::PathBuf};

@@ -24,7 +24,8 @@ Current behavior is feature-gated:
 
 - no feature flags: null/no-op mode
 - `--features=logging` with `--no-default-features`: logging mode
-- `--features=webhook`: webhook mode
+- `--features=webhook` (default): webhook mode
+- `--all-features`: combined logging + webhook mode
 
 ## Build for a real PAM environment (Linux)
 
@@ -52,11 +53,12 @@ cargo build --release --no-default-features --features=logging
 # Webhook mode
 cargo build --release --features=webhook
 
+# Combined logging + webhook mode
+cargo build --release --all-features
+
 # Null/no-op mode
 cargo build --release --no-default-features
 ```
-
-`logging` and `webhook` are mutually exclusive and should not be enabled together.
 
 ## Test matrix
 
@@ -66,8 +68,14 @@ Run tests in all supported build modes:
 # Default webhook mode
 cargo test
 
+# Combined logging + webhook mode
+cargo test --all-features
+
 # Logging mode
 cargo test --no-default-features --features logging
+
+# Webhook-only mode (explicit)
+cargo test --no-default-features --features webhook
 
 # Null/no-op mode
 cargo test --no-default-features
