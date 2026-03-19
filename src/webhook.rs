@@ -5,10 +5,11 @@ use crate::{
 use pam::{PamHandle, PamItemType, PamReturnCode};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use std::ffi::c_int;
+use std::{ffi::c_int, fs::OpenOptions, io::Write as _, path::PathBuf};
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct WebhookHandler {
+    pub(crate) log_path: Option<PathBuf>,
     pub(crate) webhook_url: Option<String>,
 }
 
@@ -45,8 +46,14 @@ impl WebhookHandler {
         Client::new()
             .post(url)
             .json(&payload)
-            .send()?
-            .error_for_status()?;
+            .send()
+            .inspect_err(|e| {
+                let _ = self.log_error(e);
+            })?
+            .error_for_status()
+            .inspect_err(|e| {
+                let _ = self.log_error(e);
+            })?;
         Ok(())
     }
 
@@ -55,6 +62,21 @@ impl WebhookHandler {
             Ok(()) => PamReturnCode::Success,
             Err(_) => PamReturnCode::Service_Err,
         }
+    }
+
+    fn log_error<E: std::fmt::Display>(&self, error: E) -> std::io::Result<()> {
+        if let Some(path) = &self.log_path {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let now = chrono::Utc::now();
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .and_then(|file| writeln!(&file, "{now} {error}"))?;
+        }
+        Ok(())
     }
 }
 
@@ -235,6 +257,7 @@ mod tests {
     fn send_hook_call_posts_payload_and_succeeds_on_200() {
         let (url, join) = spawn_single_request_server("200 OK");
         let handler = WebhookHandler {
+            log_path: None,
             webhook_url: Some(url),
         };
 
@@ -262,6 +285,7 @@ mod tests {
     fn send_hook_call_fails_on_non_success_status() {
         let (url, join) = spawn_single_request_server("500 Internal Server Error");
         let handler = WebhookHandler {
+            log_path: None,
             webhook_url: Some(url),
         };
         let mut session = PamSession::start();

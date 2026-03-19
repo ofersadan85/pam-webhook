@@ -17,4 +17,4 @@ check:
   just test
 
 build +feature:
-  cargo build --no-default-features --features {{feature}}
+  @cargo build --no-default-features --features {{feature}}
