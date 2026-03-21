@@ -1,11 +1,11 @@
 use crate::handlers::{
-    PamEventHandler, config::from_toml_config_args, get_item, hooks::PamHookType,
+    PamContext, PamEventHandler, config::from_toml_config_args, hooks::PamHookType,
 };
 use hostname::get as get_hostname;
-use pam::{PamHandle, PamItemType, PamReturnCode};
+use pam::PamReturnCode;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use std::{ffi::c_int, fs::OpenOptions, io::Write as _, path::PathBuf};
+use std::{fs::OpenOptions, io::Write as _, path::PathBuf};
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct WebhookHandler {
@@ -20,14 +20,9 @@ pub(crate) struct WebhookHandler {
 #[derive(Debug, Serialize)]
 struct HookPayload<'a> {
     hook: &'a str,
-    flags: c_int,
     hostname: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    user: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    rhost: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tty: Option<String>,
+    #[serde(flatten)]
+    context: &'a PamContext,
 }
 
 impl WebhookHandler {
@@ -57,34 +52,25 @@ impl PamEventHandler for WebhookHandler {
         from_toml_config_args(args)
     }
 
-    fn handle_hook(
-        &self,
-        hook_type: PamHookType,
-        pam_h: &mut PamHandle,
-        flags: c_int,
-    ) -> PamReturnCode {
+    fn handle_hook(&self, hook_type: PamHookType, ctx: &PamContext) -> PamReturnCode {
         let url = self.webhook_url.as_deref().unwrap_or_default();
         if url.is_empty() {
             return PamReturnCode::Service_Err;
         }
 
-        let user = get_item(pam_h, PamItemType::User);
-        let rhost = get_item(pam_h, PamItemType::RHost);
-        if self.is_excluded(user.as_deref(), rhost.as_deref()) {
+        let user = ctx.user.as_deref();
+        let rhost = ctx.rhost.as_deref();
+        if self.is_excluded(user, rhost) {
             return PamReturnCode::Success;
         }
         let payload = HookPayload {
             hook: hook_type.as_str(),
-            flags,
             hostname: get_hostname()
                 .ok()
                 .and_then(|name| name.into_string().ok())
                 .unwrap_or_default(),
-            user,
-            rhost,
-            tty: get_item(pam_h, PamItemType::TTY),
+            context: ctx,
         };
-
         let response = Client::new()
             .post(url)
             .json(&payload)
@@ -226,9 +212,9 @@ mod tests {
     fn send_hook_call_fails_when_webhook_url_missing() {
         let handler = WebhookHandler::default();
         let mut session = PamSession::start();
-
+        let context = PamContext::from_pam_handle(session.handle_mut(), 0);
         assert_eq!(
-            handler.handle_hook(PamHookType::Authenticate, session.handle_mut(), 0),
+            handler.handle_hook(PamHookType::Authenticate, &context),
             PamReturnCode::Service_Err,
             "missing url should fail"
         );
@@ -243,7 +229,6 @@ mod tests {
             exclude_rhosts: Vec::new(),
             exclude_users: Vec::new(),
         };
-
         let mut session = PamSession::start();
         let user = CString::new("alice").expect("cstr");
         let rhost = CString::new("10.0.0.9").expect("cstr");
@@ -251,9 +236,9 @@ mod tests {
         session.set_item(pam::PamItemType::User, &user);
         session.set_item(pam::PamItemType::RHost, &rhost);
         session.set_item(pam::PamItemType::TTY, &tty);
-
+        let context = PamContext::from_pam_handle(session.handle_mut(), 42);
         assert_eq!(
-            handler.handle_hook(PamHookType::Authenticate, session.handle_mut(), 42),
+            handler.handle_hook(PamHookType::Authenticate, &context),
             PamReturnCode::Success,
             "200 response should succeed"
         );
@@ -283,9 +268,9 @@ mod tests {
         session.set_item(pam::PamItemType::User, &user);
         session.set_item(pam::PamItemType::RHost, &rhost);
         session.set_item(pam::PamItemType::TTY, &tty);
-
+        let context = PamContext::from_pam_handle(session.handle_mut(), 42);
         assert_eq!(
-            handler.handle_hook(PamHookType::OpenSession, session.handle_mut(), 1),
+            handler.handle_hook(PamHookType::OpenSession, &context),
             PamReturnCode::Service_Err,
             "non-success status must fail"
         );
@@ -305,9 +290,10 @@ mod tests {
         let rhost = CString::new("10.0.0.9").expect("cstr");
         session.set_item(pam::PamItemType::User, &user);
         session.set_item(pam::PamItemType::RHost, &rhost);
+        let context = PamContext::from_pam_handle(session.handle_mut(), 0);
 
         assert_eq!(
-            handler.handle_hook(PamHookType::OpenSession, session.handle_mut(), 1),
+            handler.handle_hook(PamHookType::OpenSession, &context),
             PamReturnCode::Success,
             "excluded rhost should skip webhook call"
         );
@@ -326,9 +312,10 @@ mod tests {
         let rhost = CString::new("10.0.0.10").expect("cstr");
         session.set_item(pam::PamItemType::User, &user);
         session.set_item(pam::PamItemType::RHost, &rhost);
+        let context = PamContext::from_pam_handle(session.handle_mut(), 0);
 
         assert_eq!(
-            handler.handle_hook(PamHookType::OpenSession, session.handle_mut(), 1),
+            handler.handle_hook(PamHookType::OpenSession, &context),
             PamReturnCode::Success,
             "excluded user should skip webhook call"
         );

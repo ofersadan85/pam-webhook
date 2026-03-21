@@ -1,4 +1,5 @@
-use pam::{PamHandle, PamReturnCode};
+use pam::{PamHandle, PamItemType, PamReturnCode};
+use serde::Serialize;
 use std::ffi::{CStr, c_char, c_int};
 
 pub(crate) mod hooks;
@@ -10,6 +11,53 @@ mod config;
 mod logging;
 #[cfg(feature = "webhook")]
 mod webhook;
+
+#[derive(Debug, Serialize)]
+pub(crate) struct PamContext {
+    flags: c_int,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    service: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    user: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tty: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rhost: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ruser: Option<String>,
+}
+
+impl PamContext {
+    pub(crate) fn from_pam_handle(pam_h: &mut PamHandle, flags: c_int) -> Self {
+        Self {
+            flags,
+            service: Self::get_item(pam_h, PamItemType::Service),
+            user: Self::get_item(pam_h, PamItemType::User),
+            tty: Self::get_item(pam_h, PamItemType::TTY),
+            rhost: Self::get_item(pam_h, PamItemType::RHost),
+            ruser: Self::get_item(pam_h, PamItemType::RUser),
+        }
+    }
+
+    /// Helper to get PAM items as Rust strings. Returns None if the item is not set or on error.
+    fn get_item(pamh: &mut pam::PamHandle, item: pam::PamItemType) -> Option<String> {
+        // Use the raw FFI directly to avoid the pam crate's assert!() that panics when
+        // pam_get_item returns PAM_SUCCESS but the pointer is null (which legitimately
+        // happens for unset items in a freshly created PAM session).
+        let mut item_ptr: *const std::ffi::c_void = std::ptr::null();
+        let rc = unsafe { pam::ffi::pam_get_item(pamh, item as c_int, &raw mut item_ptr) };
+        if rc != pam::ffi::PAM_SUCCESS as c_int || item_ptr.is_null() {
+            return None;
+        }
+        let value_ptr = item_ptr.cast::<c_char>();
+        // SAFETY: pam_get_item returned PAM_SUCCESS *and* value_ptr is non-null.
+        Some(
+            unsafe { CStr::from_ptr(value_ptr) }
+                .to_string_lossy()
+                .into_owned(),
+        )
+    }
+}
 
 /// Trait defining the PAM event handlers. Each method corresponds to a PAM hook.
 /// The default implementation of all of them is a no-op and just returns [`PamReturnCode::Success`].
@@ -34,12 +82,7 @@ pub(crate) trait PamEventHandler {
         Self::from_args(&args)
     }
 
-    fn handle_hook(
-        &self,
-        _hook_type: PamHookType,
-        _pam_h: &mut PamHandle,
-        _flags: c_int,
-    ) -> PamReturnCode {
+    fn handle_hook(&self, _hook_type: PamHookType, _ctx: &PamContext) -> PamReturnCode {
         PamReturnCode::Success
     }
 }
@@ -72,21 +115,6 @@ unsafe fn parse_c_args(argc: c_int, argv: *const *const c_char) -> Vec<String> {
     result
 }
 
-/// Helper to get PAM items as Rust strings. Returns None if the item is not set or on error.
-#[cfg(any(feature = "logging", feature = "webhook"))]
-pub(crate) fn get_item(pamh: &mut pam::PamHandle, item: pam::PamItemType) -> Option<String> {
-    let Ok(value_ptr) = pam::get_item(pamh, item) else {
-        return None;
-    };
-    let value_ptr = std::ptr::from_ref::<std::ffi::c_void>(value_ptr).cast::<c_char>();
-    Some(
-        // SAFETY: pam_get_item returned PAM_SUCCESS and value_ptr was checked for null.
-        unsafe { CStr::from_ptr(value_ptr) }
-            .to_string_lossy()
-            .into_owned(),
-    )
-}
-
 #[derive(Default)]
 pub(crate) struct MultiHandler {
     handlers: Vec<Box<dyn PamEventHandler>>,
@@ -106,14 +134,9 @@ impl PamEventHandler for MultiHandler {
         Self { handlers }
     }
 
-    fn handle_hook(
-        &self,
-        hook_type: PamHookType,
-        pam_h: &mut PamHandle,
-        flags: c_int,
-    ) -> PamReturnCode {
+    fn handle_hook(&self, hook_type: PamHookType, ctx: &PamContext) -> PamReturnCode {
         for handler in &self.handlers {
-            let result = handler.handle_hook(hook_type, pam_h, flags);
+            let result = handler.handle_hook(hook_type, ctx);
             if result != PamReturnCode::Success {
                 return result;
             }

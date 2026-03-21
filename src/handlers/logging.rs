@@ -1,9 +1,9 @@
 use crate::handlers::{
-    PamEventHandler, config::from_toml_config_args, get_item, hooks::PamHookType,
+    PamContext, PamEventHandler, config::from_toml_config_args, hooks::PamHookType,
 };
-use pam::{PamHandle, PamItemType, PamReturnCode};
+use pam::PamReturnCode;
 use serde::Deserialize;
-use std::{ffi::c_int, fmt::Write as _, fs::OpenOptions, io::Write as _, path::PathBuf};
+use std::{fs::OpenOptions, io::Write, path::PathBuf};
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct LoggingHandler {
@@ -28,23 +28,13 @@ impl LoggingHandler {
     fn log_hook_call(
         &self,
         hook_type: PamHookType,
-        pam_h: &mut PamHandle,
-        flags: c_int,
+        ctx: &PamContext,
     ) -> Result<(), std::io::Error> {
         let now = chrono::Utc::now();
-        let user = get_item(pam_h, PamItemType::User).unwrap_or_default();
-        let mut log_line = format!("[pam-webhook] time={now} hook={hook_type} flags={flags}");
-        if !user.is_empty() {
-            write!(log_line, " user={user:?}").ok();
-        }
-        let rhost = get_item(pam_h, PamItemType::RHost).unwrap_or_default();
-        if !rhost.is_empty() {
-            write!(log_line, " rhost={rhost:?}").ok();
-        }
-        let tty = get_item(pam_h, PamItemType::TTY).unwrap_or_default();
-        if !tty.is_empty() {
-            write!(log_line, " tty={tty:?}").ok();
-        }
+        let mut ctx_str = toml::to_string(ctx).unwrap_or_default();
+        ctx_str = ctx_str.replace(" = ", "=");
+        ctx_str = ctx_str.replace('\n', " ");
+        let log_line = format!("[pam-webhook] time={now} hook={hook_type} flags={ctx_str}");
         self.append_log_line(&log_line)
     }
 }
@@ -54,13 +44,8 @@ impl PamEventHandler for LoggingHandler {
         from_toml_config_args(args)
     }
 
-    fn handle_hook(
-        &self,
-        hook_type: PamHookType,
-        pam_h: &mut PamHandle,
-        flags: c_int,
-    ) -> PamReturnCode {
-        match self.log_hook_call(hook_type, pam_h, flags) {
+    fn handle_hook(&self, hook_type: PamHookType, ctx: &PamContext) -> PamReturnCode {
+        match self.log_hook_call(hook_type, ctx) {
             Ok(()) => PamReturnCode::Success,
             Err(_) => PamReturnCode::Service_Err,
         }

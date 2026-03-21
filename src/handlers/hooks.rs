@@ -48,37 +48,3 @@ impl std::fmt::Display for PamHookType {
         self.as_str().fmt(f)
     }
 }
-
-/// Macro to create PAM hooks with a consistent pattern
-#[macro_export] // macro export path is at the root of the crate (`crate::create_hook!`)`)
-macro_rules! create_hook {
-    ($target:ident) => {
-        /// Called by PAM during authentication (for example when sshd checks credentials).
-        ///
-        /// # Safety
-        /// This function is called by PAM with pointers to C data. Inherently unsafe
-        #[unsafe(no_mangle)]
-        #[allow(clippy::similar_names)]
-        pub unsafe extern "C" fn $target(
-            pamh: *mut PamHandle,
-            flags: c_int,
-            argc: c_int,
-            argv: *const *const c_char,
-        ) -> c_int {
-            let handler = unsafe { MultiHandler::from_c_args(argc, argv) };
-            if pamh.is_null() {
-                PamReturnCode::Service_Err as c_int
-            } else {
-                // Safety: We checked pamh for null above
-                // and PAM guarantees that the pointer will be valid for the duration of the call
-                // Also, we won't actually do any mutations, we'll only use it to *read* PAM items
-                let pam_h = unsafe { &mut *pamh };
-                if let Ok(hook_type) = stringify!($target).parse() {
-                    handler.handle_hook(hook_type, pam_h, flags) as c_int
-                } else {
-                    PamReturnCode::Service_Err as c_int
-                }
-            }
-        }
-    };
-}
