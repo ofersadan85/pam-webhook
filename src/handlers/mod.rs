@@ -1,6 +1,9 @@
 use pam::{PamHandle, PamReturnCode};
 use std::ffi::{CStr, c_char, c_int};
 
+pub(crate) mod hooks;
+use hooks::PamHookType;
+
 #[cfg(any(feature = "logging", feature = "webhook"))]
 mod config;
 #[cfg(feature = "logging")]
@@ -31,28 +34,12 @@ pub(crate) trait PamEventHandler {
         Self::from_args(&args)
     }
 
-    /// Called by PAM during authentication (for example when sshd checks credentials).
-    fn authenticate(&self, _pam_h: &mut PamHandle, _flags: c_int) -> PamReturnCode {
-        PamReturnCode::Success
-    }
-    /// Called after authentication to establish, refresh, or delete credentials.
-    fn setcred(&self, _pam_h: &mut PamHandle, _flags: c_int) -> PamReturnCode {
-        PamReturnCode::Success
-    }
-    /// Called for account policy checks (expiration, access restrictions, time limits).
-    fn acct_mgmt(&self, _pam_h: &mut PamHandle, _flags: c_int) -> PamReturnCode {
-        PamReturnCode::Success
-    }
-    /// Called when a new session is opened (for sshd, after login succeeds).
-    fn open_session(&self, _pam_h: &mut PamHandle, _flags: c_int) -> PamReturnCode {
-        PamReturnCode::Success
-    }
-    /// Called when a session is closed (for sshd, on logout).
-    fn close_session(&self, _pam_h: &mut PamHandle, _flags: c_int) -> PamReturnCode {
-        PamReturnCode::Success
-    }
-    /// Called to change the user's authentication token (for example, when changing passwords).
-    fn chauthtok(&self, _pam_h: &mut PamHandle, _flags: c_int) -> PamReturnCode {
+    fn handle_hook(
+        &self,
+        _hook_type: PamHookType,
+        _pam_h: &mut PamHandle,
+        _flags: c_int,
+    ) -> PamReturnCode {
         PamReturnCode::Success
     }
 }
@@ -119,59 +106,14 @@ impl PamEventHandler for MultiHandler {
         Self { handlers }
     }
 
-    fn authenticate(&self, pamh: &mut PamHandle, flags: i32) -> PamReturnCode {
+    fn handle_hook(
+        &self,
+        hook_type: PamHookType,
+        pam_h: &mut PamHandle,
+        flags: c_int,
+    ) -> PamReturnCode {
         for handler in &self.handlers {
-            let result = handler.authenticate(pamh, flags);
-            if result != PamReturnCode::Success {
-                return result;
-            }
-        }
-        PamReturnCode::Success
-    }
-
-    fn setcred(&self, pamh: &mut PamHandle, flags: i32) -> PamReturnCode {
-        for handler in &self.handlers {
-            let result = handler.setcred(pamh, flags);
-            if result != PamReturnCode::Success {
-                return result;
-            }
-        }
-        PamReturnCode::Success
-    }
-
-    fn acct_mgmt(&self, pamh: &mut PamHandle, flags: i32) -> PamReturnCode {
-        for handler in &self.handlers {
-            let result = handler.acct_mgmt(pamh, flags);
-            if result != PamReturnCode::Success {
-                return result;
-            }
-        }
-        PamReturnCode::Success
-    }
-
-    fn open_session(&self, pamh: &mut PamHandle, flags: i32) -> PamReturnCode {
-        for handler in &self.handlers {
-            let result = handler.open_session(pamh, flags);
-            if result != PamReturnCode::Success {
-                return result;
-            }
-        }
-        PamReturnCode::Success
-    }
-
-    fn close_session(&self, pamh: &mut PamHandle, flags: i32) -> PamReturnCode {
-        for handler in &self.handlers {
-            let result = handler.close_session(pamh, flags);
-            if result != PamReturnCode::Success {
-                return result;
-            }
-        }
-        PamReturnCode::Success
-    }
-
-    fn chauthtok(&self, pamh: &mut PamHandle, flags: i32) -> PamReturnCode {
-        for handler in &self.handlers {
-            let result = handler.chauthtok(pamh, flags);
+            let result = handler.handle_hook(hook_type, pam_h, flags);
             if result != PamReturnCode::Success {
                 return result;
             }

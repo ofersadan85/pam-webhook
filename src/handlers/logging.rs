@@ -1,4 +1,6 @@
-use crate::handlers::{PamEventHandler, config::from_toml_config_args, get_item};
+use crate::handlers::{
+    PamEventHandler, config::from_toml_config_args, get_item, hooks::PamHookType,
+};
 use pam::{PamHandle, PamItemType, PamReturnCode};
 use serde::Deserialize;
 use std::{ffi::c_int, fmt::Write as _, fs::OpenOptions, io::Write as _, path::PathBuf};
@@ -25,13 +27,13 @@ impl LoggingHandler {
 
     fn log_hook_call(
         &self,
-        hook: &str,
+        hook_type: PamHookType,
         pam_h: &mut PamHandle,
         flags: c_int,
     ) -> Result<(), std::io::Error> {
         let now = chrono::Utc::now();
         let user = get_item(pam_h, PamItemType::User).unwrap_or_default();
-        let mut log_line = format!("[pam-webhook] time={now} hook={hook} flags={flags}");
+        let mut log_line = format!("[pam-webhook] time={now} hook={hook_type} flags={flags}");
         if !user.is_empty() {
             write!(log_line, " user={user:?}").ok();
         }
@@ -45,13 +47,6 @@ impl LoggingHandler {
         }
         self.append_log_line(&log_line)
     }
-
-    fn handle_hook(&self, hook: &str, pam_h: &mut PamHandle, flags: c_int) -> PamReturnCode {
-        match self.log_hook_call(hook, pam_h, flags) {
-            Ok(()) => PamReturnCode::Success,
-            Err(_) => PamReturnCode::Service_Err,
-        }
-    }
 }
 
 impl PamEventHandler for LoggingHandler {
@@ -59,28 +54,16 @@ impl PamEventHandler for LoggingHandler {
         from_toml_config_args(args)
     }
 
-    fn authenticate(&self, pam_h: &mut PamHandle, flags: c_int) -> PamReturnCode {
-        self.handle_hook("pam_sm_authenticate", pam_h, flags)
-    }
-
-    fn setcred(&self, pam_h: &mut PamHandle, flags: c_int) -> PamReturnCode {
-        self.handle_hook("pam_sm_setcred", pam_h, flags)
-    }
-
-    fn acct_mgmt(&self, pam_h: &mut PamHandle, flags: c_int) -> PamReturnCode {
-        self.handle_hook("pam_sm_acct_mgmt", pam_h, flags)
-    }
-
-    fn open_session(&self, pam_h: &mut PamHandle, flags: c_int) -> PamReturnCode {
-        self.handle_hook("pam_sm_open_session", pam_h, flags)
-    }
-
-    fn close_session(&self, pam_h: &mut PamHandle, flags: c_int) -> PamReturnCode {
-        self.handle_hook("pam_sm_close_session", pam_h, flags)
-    }
-
-    fn chauthtok(&self, pam_h: &mut PamHandle, flags: c_int) -> PamReturnCode {
-        self.handle_hook("pam_sm_chauthtok", pam_h, flags)
+    fn handle_hook(
+        &self,
+        hook_type: PamHookType,
+        pam_h: &mut PamHandle,
+        flags: c_int,
+    ) -> PamReturnCode {
+        match self.log_hook_call(hook_type, pam_h, flags) {
+            Ok(()) => PamReturnCode::Success,
+            Err(_) => PamReturnCode::Service_Err,
+        }
     }
 }
 
