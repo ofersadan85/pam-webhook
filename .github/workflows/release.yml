@@ -37,15 +37,39 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+  test:
+    runs-on: ubuntu-latest
+    env:
+      LLVM_CONFIG_PATH: /usr/bin/llvm-config-18
+      LIBCLANG_PATH: /usr/lib/x86_64-linux-gnu/
+    strategy:
+      matrix:
+        features:
+          - --all-features
+          - --no-default-features
+          - --no-default-features --features=logging
+          - --no-default-features --features=webhook
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libpam0g-dev clang
+
+      - name: Link clang
+        run: sudo ln -s /usr/lib/x86_64-linux-gnu/libclang-18.so.18 /usr/lib/x86_64-linux-gnu/libclang.so
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
       - name: Tests
-        run: |
-          cargo test --all-features
-          cargo test --no-default-features
-          cargo test --no-default-features --features=logging
-          cargo test --no-default-features --features=webhook
+        run: cargo test ${{ matrix.features }}
 
   release:
-    needs: validate
+    needs: [test, validate]
     runs-on: ubuntu-latest
     env:
       LLVM_CONFIG_PATH: /usr/bin/llvm-config-18
