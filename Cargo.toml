@@ -1,6 +1,6 @@
 [package]
 name = "pam-webhook"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 authors = ["Ofer Sadan <ofersadan85@gmail.com>"]
 description = "A PAM module that sends events to a webhook or a log file."
@@ -44,3 +44,9 @@ pam = { git = "https://github.com/1wilkens/pam", rev = "daf26ae3512d8e5a7478ccff
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
+
+[profile.release]
+codegen-units = 1 # Allows compiler to perform better optimization.
+lto = true        # Enables Link-time Optimization.
+opt-level = 3   # Use 3 to optimize performance, z to optimize for size, and s for something in-between
+strip = true      # Ensures debug symbols are removed.
