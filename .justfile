@@ -9,6 +9,7 @@ test *tests:
   cargo test --quiet --no-default-features {{tests}}
   cargo test --quiet --no-default-features --features=logging {{tests}}
   cargo test --quiet --no-default-features --features=webhook {{tests}}
+  cargo test --quiet --no-default-features --features=spool {{tests}}
 
 # Alias for full feature matrix.
 test-all *tests:

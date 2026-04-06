@@ -7,7 +7,7 @@ use std::{
     ptr,
     sync::OnceLock,
 };
-#[cfg(feature = "webhook")]
+#[cfg(any(feature = "webhook", feature = "spool"))]
 use std::{
     io::{BufRead, BufReader, Read, Write},
     net::TcpListener,
@@ -29,31 +29,21 @@ fn so_path() -> PathBuf {
     static SO_PATH: OnceLock<PathBuf> = OnceLock::new();
     SO_PATH
         .get_or_init(|| {
+            // Build with exactly the features that are active in this test binary.
+            let mut features: Vec<&str> = Vec::new();
+            #[cfg(feature = "logging")]
+            features.push("logging");
+            #[cfg(feature = "webhook")]
+            features.push("webhook");
+            #[cfg(feature = "spool")]
+            features.push("spool");
+
             let mut cmd = Command::new("cargo");
-            cmd.arg("build").arg("--release");
-
-            #[cfg(all(feature = "logging", feature = "webhook"))]
-            {
-                cmd.arg("--all-features");
-            }
-
-            #[cfg(all(feature = "logging", not(feature = "webhook")))]
-            {
-                cmd.arg("--no-default-features")
-                    .arg("--features")
-                    .arg("logging");
-            }
-
-            #[cfg(all(feature = "webhook", not(feature = "logging")))]
-            {
-                cmd.arg("--no-default-features")
-                    .arg("--features")
-                    .arg("webhook");
-            }
-
-            #[cfg(not(any(feature = "logging", feature = "webhook")))]
-            {
-                cmd.arg("--no-default-features");
+            cmd.arg("build")
+                .arg("--release")
+                .arg("--no-default-features");
+            if !features.is_empty() {
+                cmd.arg("--features").arg(features.join(","));
             }
 
             let status = cmd.status().expect("run cargo build --release");
@@ -90,7 +80,7 @@ fn load_release_library() -> Library {
     unsafe { Library::new(path) }.expect("load libpam_webhook.so")
 }
 
-#[cfg(any(feature = "webhook", feature = "logging"))]
+#[cfg(any(feature = "webhook", feature = "logging", feature = "spool"))]
 fn build_argv(args: &[String]) -> (Vec<CString>, Vec<*const c_char>) {
     let c_strings = args
         .iter()
@@ -155,7 +145,7 @@ impl PamSession {
         unsafe { &mut *self.handle }
     }
 
-    #[cfg(any(feature = "webhook", feature = "logging"))]
+    #[cfg(any(feature = "webhook", feature = "logging", feature = "spool"))]
     fn set_item(&mut self, item_type: pam::PamItemType, value: &CString) {
         // SAFETY: handle is valid and the C string pointer remains valid across hook calls.
         let rc = unsafe {
@@ -420,4 +410,114 @@ fn empty_features_hooks_return_success_with_valid_handle() {
         let rc = unsafe { hook(session.handle_mut(), 0, 0, ptr::null()) };
         assert_eq!(rc, PamReturnCode::Success as c_int, "{hook_name} failed");
     }
+}
+
+/// Spool-only integration test: verifies that each hook appends a JSON line to the spool file
+/// and, when `flush_interval_minutes = 0`, immediately flushes all entries to the webhook as a
+/// JSON array — clearing the sent records from the file while preserving any new ones.
+#[cfg(all(feature = "spool", not(feature = "logging"), not(feature = "webhook")))]
+#[test]
+fn spool_mode_hooks_write_spool_entries_and_flush_to_webhook() {
+    let lib = load_release_library();
+    let mut session = PamSession::start();
+    session.set_item(
+        pam::PamItemType::User,
+        &CString::new("alice").expect("user cstr"),
+    );
+    session.set_item(
+        pam::PamItemType::RHost,
+        &CString::new("192.0.2.10").expect("rhost cstr"),
+    );
+    session.set_item(
+        pam::PamItemType::TTY,
+        &CString::new("pts/0").expect("tty cstr"),
+    );
+
+    // Spawn a server that accepts one POST per hook. With flush_interval_minutes=0 the
+    // threshold is 0 seconds, so every hook call flushes its single spooled entry
+    // immediately — resulting in one 1-element batch per hook invocation.
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind spool capture server");
+    let addr = listener.local_addr().expect("get local addr");
+    let join = thread::spawn(move || {
+        let mut batches = Vec::new();
+        for _ in 0..HOOKS.len() {
+            let (mut stream, _) = listener.accept().expect("accept spool flush");
+            let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+
+            let mut content_length = 0usize;
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).expect("read header line");
+                if line == "\r\n" {
+                    break;
+                }
+                let lower = line.to_ascii_lowercase();
+                if let Some(value) = lower.strip_prefix("content-length:") {
+                    content_length = value.trim().parse::<usize>().expect("parse content-length");
+                }
+            }
+
+            let mut body = vec![0_u8; content_length];
+            reader.read_exact(&mut body).expect("read request body");
+            batches.push(String::from_utf8(body).expect("UTF-8 JSON payload"));
+
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .expect("write response");
+            stream.flush().expect("flush response");
+        }
+        batches
+    });
+
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let spool_path = tmp.path().join("pam/spool.ndjson");
+    let cfg_path = tmp.path().join("pam-webhook.toml");
+    std::fs::write(
+        &cfg_path,
+        format!(
+            "spool_path = \"{}\"\nwebhook_url = \"http://{addr}\"\nflush_interval_minutes = 0\n",
+            spool_path.display()
+        ),
+    )
+    .expect("write config");
+    let module_args = vec![format!("config={}", cfg_path.display())];
+    let (_arg_storage, arg_ptrs) = build_argv(&module_args);
+
+    for hook_name in HOOKS {
+        let hook = load_hook(&lib, hook_name);
+        // SAFETY: handle and argv remain valid across the FFI boundary.
+        let argc = c_int::try_from(arg_ptrs.len()).expect("argv length must fit in c_int");
+        let rc = unsafe { hook(session.handle, 7, argc, arg_ptrs.as_ptr()) };
+        assert_eq!(rc, PamReturnCode::Success as c_int, "{hook_name} failed");
+    }
+
+    let batches = join.join().expect("spool server should finish");
+    assert_eq!(
+        batches.len(),
+        HOOKS.len(),
+        "one flush request per hook expected"
+    );
+    for (batch, hook_name) in batches.iter().zip(HOOKS.iter()) {
+        // Each flush is a JSON array.
+        assert!(
+            batch.starts_with('['),
+            "{hook_name}: payload should be a JSON array"
+        );
+        assert!(
+            batch.contains(&format!("\"hook\":\"{hook_name}\"")),
+            "{hook_name}: hook name missing in payload"
+        );
+        assert!(batch.contains("\"flags\":7"), "{hook_name}: flags missing");
+        assert!(
+            batch.contains("\"user\":\"alice\""),
+            "{hook_name}: user missing"
+        );
+    }
+
+    // After all hooks have flushed, the spool file should be empty.
+    let remaining = std::fs::read_to_string(&spool_path).expect("read spool after all hooks");
+    assert!(
+        remaining.trim().is_empty(),
+        "spool file should be empty after all hooks flushed successfully"
+    );
 }

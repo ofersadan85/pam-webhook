@@ -5,10 +5,12 @@ use std::ffi::{CStr, c_char, c_int};
 pub(crate) mod hooks;
 use hooks::PamHookType;
 
-#[cfg(any(feature = "logging", feature = "webhook"))]
+#[cfg(any(feature = "logging", feature = "webhook", feature = "spool"))]
 mod config;
 #[cfg(feature = "logging")]
 mod logging;
+#[cfg(feature = "spool")]
+mod spool;
 #[cfg(feature = "webhook")]
 mod webhook;
 
@@ -131,6 +133,8 @@ impl PamEventHandler for MultiHandler {
         handlers.push(Box::new(logging::LoggingHandler::from_args(args)));
         #[cfg(feature = "webhook")]
         handlers.push(Box::new(webhook::WebhookHandler::from_args(args)));
+        #[cfg(feature = "spool")]
+        handlers.push(Box::new(spool::SpoolHandler::from_args(args)));
         Self { handlers }
     }
 

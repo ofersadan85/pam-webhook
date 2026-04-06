@@ -15,6 +15,7 @@ crate-type = ["cdylib"]
 default = ["logging", "webhook"]
 logging = []
 webhook = ["dep:reqwest"]
+spool = ["dep:reqwest", "dep:serde_json"]
 
 [dependencies]
 chrono = "0.4.44"
@@ -26,6 +27,7 @@ reqwest = { version = "0.13.2", default-features = false, optional = true, featu
     "rustls",
 ] }
 serde = { version = "1.0.228", features = ["derive"] }
+serde_json = { version = "1", optional = true }
 thiserror = "2.0.18"
 toml = "1.0.7"
 
