@@ -883,6 +883,7 @@ dependencies = [
  "pam",
  "reqwest",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "toml",
